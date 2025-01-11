@@ -50,7 +50,6 @@ public class OrderService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        eventService.save(event);
-        return event;
+       return eventService.save(event);
     }
 }
