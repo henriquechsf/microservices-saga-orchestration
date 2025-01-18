@@ -4,7 +4,6 @@ import br.com.microservices.orchestrated.productvalidationservice.config.excepti
 import br.com.microservices.orchestrated.productvalidationservice.core.dto.Event;
 import br.com.microservices.orchestrated.productvalidationservice.core.dto.History;
 import br.com.microservices.orchestrated.productvalidationservice.core.dto.OrderProducts;
-import br.com.microservices.orchestrated.productvalidationservice.core.enums.ESagaStatus;
 import br.com.microservices.orchestrated.productvalidationservice.core.model.Validation;
 import br.com.microservices.orchestrated.productvalidationservice.core.producer.KafkaProducer;
 import br.com.microservices.orchestrated.productvalidationservice.core.repository.ProductRepository;
@@ -38,17 +37,29 @@ public class ProductValidationService {
             handleSuccess(event);
         } catch (Exception ex) {
             log.error("Error trying to validate products: ", ex);
-            //handleFailCurrentNotExecuted(event, ex.getMessage());
+            handleFailCurrentNotExecuted(event, ex.getMessage());
         }
+
+        producer.sendEvent(jsonUtil.toJson(event));
+    }
+
+    public void rollbackEvent(Event event) {
+        changeValidateToFail(event);
+
+        event.setStatus(FAIL);
+        event.setSource(CURRENT_SOURCE);
+        addHistory(event, "Rollback executed on product validation!");
 
         producer.sendEvent(jsonUtil.toJson(event));
     }
 
     private void checkCurrentValidation(Event event) {
         validateProductsInformed(event);
+
         if (validationRepository.existsByOrderIdAndTransactionId(event.getOrderId(), event.getTransactionId())) {
             throw new ValidationException("There's another transactionId for this validation.");
         }
+
         event.getPayload().getProducts().forEach(product -> {
             validateProductInformed(product);
             validateExistingProduct(product.getProduct().getCode());
@@ -72,7 +83,7 @@ public class ProductValidationService {
 
     private void validateExistingProduct(String code) {
         if (!productRepository.existsByCode(code)) {
-            throw new ValidationException("Product does not exists in database!");
+            throw new ValidationException("Product: " + code + " does not exists in database!");
         }
     }
 
@@ -103,5 +114,20 @@ public class ProductValidationService {
                 .build();
 
         event.addToHistory(history);
+    }
+
+    private void handleFailCurrentNotExecuted(Event event, String message) {
+        event.setStatus(ROLLBACK_PENDING);
+        event.setSource(CURRENT_SOURCE);
+        addHistory(event, "Failed to validate products: ".concat(message));
+    }
+
+    private void changeValidateToFail(Event event) {
+        validationRepository
+                .findByOrderIdAndTransactionId(event.getPayload().getId(), event.getTransactionId())
+                .ifPresentOrElse(validation -> {
+                    validation.setSuccess(false);
+                    validationRepository.save(validation);
+                }, () -> createValidation(event, false));
     }
 }
