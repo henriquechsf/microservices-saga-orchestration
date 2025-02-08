@@ -7,7 +7,6 @@ import static br.com.microservices.orchestrated.orchestratorservice.core.enums.E
 public final class SagaHandler {
 
     private SagaHandler() {
-
     }
 
     public static final Object[][] SAGA_HANDLER = {
